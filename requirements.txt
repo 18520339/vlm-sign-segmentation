@@ -1,0 +1,22 @@
+# Core
+numpy
+matplotlib
+
+# Subtitle parsing
+srt
+webvtt-py
+
+# EAF parsing (base repo output)
+pympi-ling
+
+# Video metadata + overlay rendering
+opencv-python
+
+# Gemini API
+google-genai
+
+# Qwen3-VL — install these in Colab:
+#   pip install git+https://github.com/huggingface/transformers  # >=4.57.0
+#   pip install torch accelerate
+#   pip install "qwen-vl-utils>=0.0.14"   # need return_video_metadata support
+#   pip install decord                      # faster video frame extraction
