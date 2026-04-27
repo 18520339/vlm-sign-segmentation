@@ -1,5 +1,3 @@
-"""Central configuration for VLM sign language phrase segmentation."""
-
 import os
 from pathlib import Path
 
@@ -30,7 +28,12 @@ QWEN_MAX_PIXELS = 360 * 640   # per-frame resolution budget (~360p)
 QWEN_MAX_NEW_TOKENS = 4096    # max tokens for the generated JSON response
 
 # ── Evaluation ─────────────────────────────────────────────────────────────────
-EVAL_RESOLUTION_S = 0.04      # 25-fps equivalent for IoU discretisation
+EVAL_RESOLUTION_S = 1 / QWEN_VIDEO_FPS # 30-fps equivalent for IoU discretisation
+
+# Post-processing (zero extra inference cost)
+MIN_SEGMENT_S = 0.3           # merge segments shorter than this into neighbours
+MAX_GAP_S = 0.05              # fill silent gaps shorter than this
+POSE_SNAP_WINDOW_S = 0.7      # ±window to search for velocity minimum in pose data
 
 # Segment F1 uses pairwise IoU matching (standard in temporal action detection).
 # Report at multiple thresholds like ActivityNet: 0.3, 0.5, 0.7.
@@ -38,10 +41,14 @@ SEGMENT_IOU_THRESHOLDS = [0.3, 0.5, 0.7]
 
 # ── VLM Prompt ─────────────────────────────────────────────────────────────────
 # Shared across Gemini and Qwen so that the only variable is the model itself.
+# Prompt template.  The {duration_s} placeholder is filled at inference time
+# so the model knows the video's exact length (zero-cost calibration hint).
 PHRASE_SEGMENTATION_PROMPT = """\
 You are an expert in sign language video analysis, specifically Australian \
 Sign Language (Auslan). Your task is to perform precise phrase-level temporal \
 segmentation on this video.
+
+VIDEO DURATION: {duration_s:.1f} seconds
 
 CONTEXT: This is a YouTube video containing Auslan signing. The video may \
 include non-signing segments such as title cards, transitions, captions, \
@@ -64,7 +71,7 @@ HOW TO DETECT PHRASE BOUNDARIES:
 
 RULES:
 1. Provide start and end timestamps in SECONDS with decimal precision \
-   (e.g., 3.2)
+   (e.g., 3.2). Timestamps MUST be between 0 and {duration_s:.1f}
 2. Include ALL signed phrases — do not skip any
 3. EXCLUDE non-signing periods (idle time, title screens, camera adjustments)
 4. Segments must not overlap and must be in chronological order
@@ -73,5 +80,5 @@ RULES:
 6. Very short hesitations within a phrase should NOT create a new boundary
 
 Return ONLY a JSON array with no additional text:
-[{"start": <seconds>, "end": <seconds>}, ...]
+[{{"start": <seconds>, "end": <seconds>}}, ...]
 """

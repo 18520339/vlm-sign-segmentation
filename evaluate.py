@@ -9,20 +9,15 @@ Usage:
     python evaluate.py --methods gemini          # Gemini only
     python evaluate.py --skip_inference          # re-evaluate from cache
     python evaluate.py --no_video                # skip overlay video rendering
-    python evaluate.py --qwen_model_id Qwen/Qwen3-VL-72B-Instruct-AWQ
+    python evaluate.py --qwen_model_id Qwen/Qwen3-VL-32B-Thinking
 """
-
-from __future__ import annotations
-
-import argparse
-import json
-import logging
 import sys
+import json
+import argparse
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
-
 from config import (
     DATA_DIR, OUTPUT_DIR, GEMINI_API_KEY, QWEN_MODEL_ID,
     EVAL_RESOLUTION_S, SEGMENT_IOU_THRESHOLDS,
@@ -32,22 +27,12 @@ from data_utils import (
     get_video_duration, get_video_fps, load_segments_json,
 )
 from metrics import compute_all_metrics, boundary_errors as compute_boundary_errors
+from postprocess import postprocess_segments
 from visualize import generate_all_plots, render_overlay_video
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-    datefmt="%H:%M:%S",
-)
-logger = logging.getLogger(__name__)
-
-
-# ── CLI ────────────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="Evaluate VLM phrase segmentation against GT subtitles",
-    )
+    p = argparse.ArgumentParser(description="Evaluate VLM phrase segmentation against GT subtitles")
     p.add_argument("--data_dir", type=Path, default=DATA_DIR,
                    help="Directory containing *.mp4, *.srt/*.vtt, *.eaf files")
     p.add_argument("--output_dir", type=Path, default=OUTPUT_DIR,
@@ -64,28 +49,20 @@ def parse_args() -> argparse.Namespace:
                    help="Comma-separated video stems to process (default: all)")
     p.add_argument("--no_video", action="store_true",
                    help="Skip overlay video rendering")
+    p.add_argument("--no_postprocess", action="store_true",
+                   help="Skip post-processing (merge short, fill gaps, pose snap)")
     return p.parse_args()
 
 
-# ── Inference dispatch ─────────────────────────────────────────────────────────
-
 def run_method(
-    method: str,
-    video_path: Path,
-    cache_dir: Path,
-    api_key: Optional[str] = None,
-    qwen_model_id: str = QWEN_MODEL_ID,
-    skip_inference: bool = False,
-) -> List[Segment]:
-    """Run a single method on a single video, with caching."""
+    method: str, video_path: Path, cache_dir: Path, api_key: Optional[str] = None, 
+    qwen_model_id: str = QWEN_MODEL_ID, skip_inference: bool = False,
+) -> List[Segment]: # Run a single method on a single video, with caching
     cache_path = cache_dir / f"{video_path.stem}_{method}.json"
-
-    if cache_path.exists():
-        return load_segments_json(cache_path)
+    if cache_path.exists(): return load_segments_json(cache_path)
 
     if skip_inference:
-        logger.warning("No cached result for %s/%s and --skip_inference is set",
-                       method, video_path.stem)
+        print(f"  WARNING: No cached result for {method}/{video_path.stem} and --skip_inference is set")
         return []
 
     if method == "gemini":
@@ -93,27 +70,16 @@ def run_method(
         return run_gemini_inference(video_path, api_key=api_key, cache_dir=cache_dir)
     elif method == "qwen":
         from inference_qwen import run_qwen_inference
-        return run_qwen_inference(
-            video_path, model_id=qwen_model_id, cache_dir=cache_dir,
-        )
-    else:
-        raise ValueError(f"Unknown method: {method}")
+        return run_qwen_inference(video_path, model_id=qwen_model_id, cache_dir=cache_dir)
+    raise ValueError(f"Unknown method: {method}")
 
-
-# ── Pretty-print table ────────────────────────────────────────────────────────
 
 def _fmt(val, fmt=".3f"):
-    if val is None or (isinstance(val, float) and np.isnan(val)):
-        return "  —  "
+    if val is None or (isinstance(val, float) and np.isnan(val)): return "  —  "
     return f"{val:{fmt}}"
 
 
-def print_summary_table(
-    aggregated: Dict[str, Dict[str, float]],
-    n_videos: int,
-    iou_thresholds: List[float],
-):
-    """Print a formatted summary table to stdout."""
+def print_summary_table(aggregated: Dict[str, Dict[str, float]], n_videos: int, iou_thresholds: List[float]):
     methods = list(aggregated.keys())
 
     # Header row
@@ -124,8 +90,7 @@ def print_summary_table(
 
     # Column headers
     cols = f"  {'Method':<10} {'tIoU':>7}"
-    for thr in iou_thresholds:
-        cols += f" {'F1@'+f'{thr:.1f}':>8}"
+    for thr in iou_thresholds: cols += f" {'F1@'+f'{thr:.1f}':>8}"
     cols += f" {'MAE(s)':>8} {'CntRat':>8} {'#Pred':>6} {'#GT':>6}"
     header += cols + f"\n{'─' * width}"
     print(header)
@@ -133,18 +98,14 @@ def print_summary_table(
     for m in methods:
         d = aggregated[m]
         row = f"  {m:<10} {_fmt(d.get('temporal_iou')):>7}"
-        for thr in iou_thresholds:
-            row += f" {_fmt(d.get(f'seg_f1@{thr:.1f}')):>8}"
+        for thr in iou_thresholds: row += f" {_fmt(d.get(f'seg_f1@{thr:.1f}')):>8}"
         row += f" {_fmt(d.get('boundary_mean_abs_error_s'), '.2f'):>8}"
         row += f" {_fmt(d.get('count_ratio'), '.2f'):>8}"
         row += f" {_fmt(d.get('pred_count'), '.0f'):>6}"
         row += f" {_fmt(d.get('gt_count'), '.0f'):>6}"
         print(row)
-
     print(f"{'═' * width}\n")
 
-
-# ── Main pipeline ─────────────────────────────────────────────────────────────
 
 def main():
     args = parse_args()
@@ -168,66 +129,67 @@ def main():
         print(f"No videos found in {args.data_dir} (need *.mp4 + matching *.srt or *.vtt)")
         sys.exit(1)
 
-    logger.info("Found %d video(s): %s", len(groups),
-                ", ".join(g["name"] for g in groups))
-
+    print(f"Found {len(groups)} video(s): {', '.join(g['name'] for g in groups)}")
     api_key = args.gemini_api_key or GEMINI_API_KEY
 
     # Process each video
     video_results: List[dict] = []
-
     for group in groups:
         vname = group["name"]
-        logger.info("── Processing: %s ──", vname)
+        print(f"\n── Processing: {vname} ──")
 
         # Load GT
         gt_segments = parse_subtitles(group["subs"])
         duration_s = get_video_duration(group["video"])
-        logger.info("  GT: %d phrases (from %s), duration: %.1fs",
-                    len(gt_segments), group["subs"].suffix, duration_s)
+        print(f"  GT: {len(gt_segments)} phrases (from {group['subs'].suffix}), duration: {duration_s:.1f}s")
 
         # Load base repo (EAF)
         base_segments: List[Segment] = []
         if group["eaf"]:
             try:
                 base_segments = parse_eaf_sentences(group["eaf"])
-                logger.info("  Base: %d phrases from EAF", len(base_segments))
+                print(f"  Base: {len(base_segments)} phrases from EAF")
             except Exception as e:
-                logger.warning("  Could not parse EAF: %s", e)
+                print(f"  WARNING: Could not parse EAF: {e}")
 
         # Collect all method segments
         all_segments: Dict[str, List[Segment]] = {"GT": gt_segments}
-        if base_segments:
-            all_segments["Base"] = base_segments
-
+        if base_segments: all_segments["Base"] = base_segments
         for method in enabled_methods:
             try:
                 segs = run_method(
-                    method, group["video"], args.output_dir,
-                    api_key=api_key,
-                    qwen_model_id=args.qwen_model_id,
-                    skip_inference=args.skip_inference,
+                    method, group["video"], args.output_dir, api_key=api_key,
+                    qwen_model_id=args.qwen_model_id, skip_inference=args.skip_inference,
                 )
                 method_label = "Gemini" if method == "gemini" else "Qwen"
                 all_segments[method_label] = segs
-                logger.info("  %s: %d phrases", method_label, len(segs))
+                print(f"  {method_label}: {len(segs)} phrases")
             except Exception as e:
-                logger.error("  %s failed: %s", method, e)
+                print(f"  ERROR: {method} failed: {e}")
+
+        # Post-process all non-GT methods (zero inference cost)
+        if not args.no_postprocess:
+            pose_path = group["video"].with_suffix(".pose")
+            if not pose_path.exists(): pose_path = None
+            for label in list(all_segments.keys()):
+                if label == "GT": continue
+                n_before = len(all_segments[label])
+                all_segments[label] = postprocess_segments(all_segments[label], pose_path=pose_path)
+                n_after = len(all_segments[label])
+                if n_before != n_after: print(f"  {label} postprocess: {n_before} → {n_after} segments")
 
         # Compute metrics for each prediction method
         method_metrics: Dict[str, dict] = {}
         method_boundary_errors: Dict[str, List[float]] = {}
 
         for method_label, segs in all_segments.items():
-            if method_label == "GT":
-                continue
+            if method_label == "GT": continue
             m = compute_all_metrics(
                 segs, gt_segments, duration_s,
                 resolution_s=EVAL_RESOLUTION_S,
                 iou_thresholds=SEGMENT_IOU_THRESHOLDS,
             )
             method_metrics[method_label] = m
-
             be = compute_boundary_errors(segs, gt_segments)
             method_boundary_errors[method_label] = be["errors"]
 
@@ -242,57 +204,41 @@ def main():
 
     # ── Aggregate metrics ──────────────────────────────────────────────────
     all_methods = set()
-    for vr in video_results:
-        all_methods.update(vr["metrics"].keys())
-
+    for vr in video_results: all_methods.update(vr["metrics"].keys())
     aggregated: Dict[str, Dict[str, float]] = {}
+    
     for method in sorted(all_methods):
-        per_video_metrics = [
-            vr["metrics"][method]
-            for vr in video_results
-            if method in vr["metrics"]
-        ]
-        if not per_video_metrics:
-            continue
+        per_video_metrics = [vr["metrics"][method] for vr in video_results if method in vr["metrics"]]
+        if not per_video_metrics: continue
 
         avg: Dict[str, float] = {}
         for key in per_video_metrics[0]:
-            vals = [m[key] for m in per_video_metrics
-                    if key in m and not np.isnan(m.get(key, 0))]
+            vals = [m[key] for m in per_video_metrics if key in m and not np.isnan(m.get(key, 0))]
             avg[key] = float(np.mean(vals)) if vals else float("nan")
         aggregated[method] = avg
 
-    # ── Print summary ──────────────────────────────────────────────────────
     print_summary_table(aggregated, len(video_results), SEGMENT_IOU_THRESHOLDS)
-
-    # ── Save detailed results ──────────────────────────────────────────────
     summary_path = args.output_dir / "summary.json"
     serialisable = {}
+    
     for vr in video_results:
-        vdata = {
+        serialisable[vr["name"]] = {
             "duration_s": vr["duration_s"],
-            "segments": {
-                m: [s.to_dict() for s in segs]
-                for m, segs in vr["segments"].items()
-            },
+            "segments": {m: [s.to_dict() for s in segs] for m, segs in vr["segments"].items()},
             "metrics": vr["metrics"],
         }
-        serialisable[vr["name"]] = vdata
     serialisable["_aggregated"] = aggregated
 
     with open(summary_path, "w") as f:
         json.dump(serialisable, f, indent=2, default=str)
-    logger.info("Detailed results saved to %s", summary_path)
+    print(f"Detailed results saved to {summary_path}")
 
-    # ── Visualisations ─────────────────────────────────────────────────────
-    logger.info("Generating plot visualisations …")
+    print("Generating plot visualisations …")
     plots = generate_all_plots(video_results, args.output_dir)
-    for p in plots:
-        logger.info("  Saved: %s", p)
+    for p in plots: print(f"  Saved: {p}")
 
-    # ── Overlay videos ─────────────────────────────────────────────────────
     if not args.no_video:
-        logger.info("Rendering overlay videos …")
+        print("Rendering overlay videos …")
         for vr in video_results:
             try:
                 out_path = render_overlay_video(
@@ -300,11 +246,9 @@ def main():
                     method_segments=vr["segments"],
                     output_dir=args.output_dir,
                 )
-                logger.info("  Saved: %s", out_path)
+                print(f"  Saved: {out_path}")
             except Exception as e:
-                logger.error("  Overlay video failed for %s: %s", vr["name"], e)
-
-    logger.info("Done.")
+                print(f"  ERROR: Overlay video failed for {vr['name']}: {e}")
 
 
 if __name__ == "__main__":
