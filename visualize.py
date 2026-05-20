@@ -1,8 +1,5 @@
-"""Visualisation functions for comparing phrase segmentation methods.
-
-All plots are saved as PNG to the output directory.  Each function is
-self-contained and can be called independently.
-"""
+# Visualisation functions for comparing phrase segmentation methods.
+# All plots are saved as PNG. Each function is self-contained and can be called independently.
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,22 +15,17 @@ METHOD_COLORS = {
     "Gemini": "#e67e22",   # orange
     "Qwen":   "#9b59b6",   # purple
 }
-
-def _setup_style():
-    plt.rcParams.update({
-        "figure.facecolor": "white",
-        "axes.facecolor": "#fafafa",
-        "axes.grid": True,
-        "grid.alpha": 0.3,
-        "font.size": 11,
-        "axes.titlesize": 13,
-        "axes.labelsize": 11,
-    })
-
-_setup_style()
+plt.rcParams.update({
+    "figure.facecolor": "white",
+    "axes.facecolor": "#fafafa",
+    "axes.grid": True,
+    "grid.alpha": 0.3,
+    "font.size": 11,
+    "axes.titlesize": 13,
+    "axes.labelsize": 11,
+})
 
 # ── 1. Timeline comparison (per video) ─────────────────────────────────────────
-
 def plot_timeline(
     video_name: str, duration_s: float,
     method_segments: Dict[str, List[Segment]], output_dir: Path,
@@ -72,7 +64,6 @@ def plot_timeline(
 
 
 # ── 2. Metrics summary bar chart ──────────────────────────────────────────────
-
 def plot_metrics_summary(all_metrics: Dict[str, Dict[str, List[float]]], output_dir: Path) -> Path: 
     # Grouped bar chart of key metrics across methods. *all_metrics*: {method_name: {metric_name: [per-video values]}}
     display_metrics = [
@@ -81,7 +72,6 @@ def plot_metrics_summary(all_metrics: Dict[str, Dict[str, List[float]]], output_
         ("seg_f1@0.5",   "F1 @0.5"),
         ("seg_f1@0.7",   "F1 @0.7"),
     ]
-
     methods = list(all_metrics.keys())
     n_metrics = len(display_metrics)
     n_methods = len(methods)
@@ -100,9 +90,8 @@ def plot_metrics_summary(all_metrics: Dict[str, Dict[str, List[float]]], output_
         bars = ax.bar(x + offset, means, width, yerr=stds if any(s > 0 for s in stds) else None,
                       label=method, color=METHOD_COLORS.get(method, "#95a5a6"),
                       alpha=0.85, capsize=3, edgecolor="white", linewidth=0.5)
-
-        # Value labels
-        for bar, mean in zip(bars, means):
+        
+        for bar, mean in zip(bars, means): # Value labels
             ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                     f"{mean:.3f}", ha="center", va="bottom", fontsize=8)
 
@@ -121,7 +110,6 @@ def plot_metrics_summary(all_metrics: Dict[str, Dict[str, List[float]]], output_
 
 
 # ── 3. IoU distribution box plot ──────────────────────────────────────────────
-
 def plot_iou_distribution(all_metrics: Dict[str, Dict[str, List[float]]], output_dir: Path) -> Path:
     # Box plot of per-video temporal IoU for each method
     methods = list(all_metrics.keys())
@@ -152,7 +140,6 @@ def plot_iou_distribution(all_metrics: Dict[str, Dict[str, List[float]]], output
 
 
 # ── 4. Segmentation tendency scatter ──────────────────────────────────────────
-
 def plot_segmentation_tendency(all_metrics: Dict[str, Dict[str, List[float]]], output_dir: Path) -> Path:
     # Scatter: predicted vs GT segment count per method.
     # Points on the diagonal = perfect count.  Above = over-segmentation.
@@ -165,8 +152,7 @@ def plot_segmentation_tendency(all_metrics: Dict[str, Dict[str, List[float]]], o
         gt_counts = all_metrics[method].get("gt_count", [])
         all_counts.extend(gt_counts + pred_counts)
         color = METHOD_COLORS.get(method, "#95a5a6")
-        ax.scatter(gt_counts, pred_counts, label=method, color=color,
-                   s=80, alpha=0.85, edgecolors="white", linewidth=1)
+        ax.scatter(gt_counts, pred_counts, label=method, color=color, s=80, alpha=0.85, edgecolors="white", linewidth=1)
 
     if all_counts: max_val = max(all_counts) * 1.15
     else: max_val = 10
@@ -188,7 +174,6 @@ def plot_segmentation_tendency(all_metrics: Dict[str, Dict[str, List[float]]], o
 
 
 # ── 5. Boundary error histogram ───────────────────────────────────────────────
-
 def plot_boundary_errors(boundary_errors_by_method: Dict[str, List[float]], output_dir: Path) -> Path:
     # Histogram of boundary timing errors for each method.
     # Centered at 0 = perfect alignment.  Positive = prediction is late.
@@ -209,9 +194,7 @@ def plot_boundary_errors(boundary_errors_by_method: Dict[str, List[float]], outp
         ax.axvline(0, color="black", linestyle="--", alpha=0.4)
 
         mean_err = np.mean(np.abs(errors))
-        ax.axvline(np.mean(errors), color="red", linestyle="-", alpha=0.6,
-                   label=f"Mean = {np.mean(errors):+.2f}s")
-
+        ax.axvline(np.mean(errors), color="red", linestyle="-", alpha=0.6, label=f"Mean = {np.mean(errors):+.2f}s")
         ax.set_xlabel("Error (seconds)")
         ax.set_title(f"{method}  (MAE={mean_err:.2f}s)", fontweight="bold")
         ax.legend(fontsize=8, framealpha=0.9)
@@ -269,7 +252,6 @@ def generate_all_plots(video_results: List[dict], output_dir: Path) -> List[Path
 
 
 # ── 6. Overlay video rendering ─────────────────────────────────────────────────
-
 def _get_active_text(t: float, segments: List[Segment]) -> str: # Return the text of the GT segment that is active at time *t*
     for s in segments:
         if s.start_s <= t <= s.end_s: return s.text or ""
@@ -279,7 +261,6 @@ def _get_active_text(t: float, segments: List[Segment]) -> str: # Return the tex
 
 def _draw_text(frame, text: str, pos: tuple, font_scale: float = 0.6, color=(255, 255, 255), thickness: int = 1, bg_color=None):
     # Draw text with optional background rectangle using OpenCV
-    import cv2
     font = cv2.FONT_HERSHEY_SIMPLEX
     (tw, th), baseline = cv2.getTextSize(text, font, font_scale, thickness)
     x, y = pos
@@ -310,14 +291,13 @@ def render_overlay_video(
     │  GT subtitle text           │
     ├─────────────────────────────┤
     │  GT     ████  ████  ████    │  ← 20px per method row
-    │  Qwen   ██████   ████      │    with 1px borders on each
-    │  Base   ███  ██  ████      │    segment block so gaps
+    │  Qwen   ██████   ████       │    with 1px borders on each
+    │  Base   ███  ██  ████       │    segment block so gaps
     │  ...                        │    are clearly visible
-    ├── 0:00  0:15  0:30  0:45 ──┤  ← time axis with ticks
-    │  0:12.34 / 1:04.50         │  ← current time readout
+    ├── 0:00  0:15  0:30  0:45  ──┤  ← time axis with ticks
+    │  0:12.34 / 1:04.50          │  ← current time readout
     └─────────────────────────────┘
     """
-
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened(): raise RuntimeError(f"Cannot open video: {video_path}")
     src_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
@@ -416,8 +396,7 @@ def render_overlay_video(
             cv2.rectangle(out_frame, (tl_x0, row_y), (tl_x1, row_y + tl_row_h - 1), dim_bgr, cv2.FILLED)
 
             # Method label (left of the bar)
-            _draw_text(out_frame, method, (pad, row_y + tl_row_h - 5),
-                       font_scale=0.45, color=color_bgr, thickness=1)
+            _draw_text(out_frame, method, (pad, row_y + tl_row_h - 5), font_scale=0.45, color=color_bgr, thickness=1)
 
             # Segment blocks with 1px dark border (makes gaps clearly visible)
             for (x1, x2) in seg_px[method]:

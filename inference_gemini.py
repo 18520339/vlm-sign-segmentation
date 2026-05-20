@@ -12,15 +12,11 @@ from data_utils import Segment, save_segments_json, load_segments_json, get_vide
 from config import GEMINI_API_KEY, GEMINI_MODEL, PHRASE_SEGMENTATION_PROMPT, OUTPUT_DIR
 
 
-# ── JSON response parsing ──────────────────────────────────────────────────────
-
 def _parse_segments_json(text: str) -> List[Segment]: # Parse a JSON array of {start, end} objects from model output
-
     text = text.strip()
     try: # Try direct parse
         data = json.loads(text)
-        if isinstance(data, list):
-            return _validate_segments([Segment.from_dict(d) for d in data])
+        if isinstance(data, list): return _validate_segments([Segment.from_dict(d) for d in data])
     except (json.JSONDecodeError, KeyError, TypeError): pass
 
     # Fallback: extract the first JSON array from the text
@@ -50,17 +46,11 @@ def _validate_segments(segments: List[Segment]) -> List[Segment]: # Filter out i
 
 
 def run_gemini_inference(
-    video_path: Path, *,
-    api_key: Optional[str] = None,
-    model: str = GEMINI_MODEL,
-    cache_dir: Optional[Path] = None,
-    max_retries: int = 3,
-) -> List[Segment]:
-    """Upload *video_path* to Gemini, prompt for phrase segmentation.
-
-    Results are cached as JSON in *cache_dir* (default: OUTPUT_DIR).
-    On subsequent calls, the cached result is returned immediately.
-    """
+    video_path: Path, *, api_key: Optional[str] = None, model: str = GEMINI_MODEL,
+    cache_dir: Optional[Path] = None, max_retries: int = 3,
+) -> List[Segment]: # Upload *video_path* to Gemini, prompt for phrase segmentation
+    # Results are cached as JSON in *cache_dir* (default: OUTPUT_DIR).
+    # On subsequent calls, the cached result is returned immediately.
     cache_dir = cache_dir or OUTPUT_DIR
     cache_path = cache_dir / f"{video_path.stem}_gemini.json"
 
@@ -70,12 +60,9 @@ def run_gemini_inference(
 
     # Lazy import so the module can be imported even without the SDK
     from google import genai
-
     api_key = api_key or GEMINI_API_KEY
     if not api_key: raise ValueError(
-        "Gemini API key not provided. Set GEMINI_API_KEY environment "
-        "variable or pass api_key= argument."
-    )
+        "Gemini API key not provided. Set GEMINI_API_KEY environment variable or pass api_key= argument.")
     client = genai.Client(api_key=api_key)
 
     # Upload video
@@ -88,9 +75,7 @@ def run_gemini_inference(
         video_file = client.files.get(name=video_file.name)
 
     if video_file.state.name == "FAILED": raise RuntimeError(
-        f"Gemini file processing failed for {video_path.name}: "
-        f"{getattr(video_file, 'error', 'unknown error')}"
-    )
+        f"Gemini file processing failed for {video_path.name}: {getattr(video_file, 'error', 'unknown error')}")
     print(f"[Gemini] File ready. Sending prompt to {model} …")
 
     # Format prompt with actual video duration
@@ -118,8 +103,7 @@ def run_gemini_inference(
     if not segments and last_error:
         raise RuntimeError(f"Gemini inference failed after {max_retries} attempts") from last_error
 
-    try: # Clean up remote file
-        client.files.delete(name=video_file.name)
+    try: client.files.delete(name=video_file.name) # Clean up remote file
     except Exception: pass
 
     # Cache result

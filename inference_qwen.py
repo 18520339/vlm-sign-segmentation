@@ -93,14 +93,10 @@ def _sanitize_video_kwargs(video_kwargs: dict) -> dict: # fps comes as a list, p
 
 
 def _infer_single(
-    video_path: Path, model,
-    processor, duration_s: float,
-    fps: float = QWEN_VIDEO_FPS,
-    max_pixels: int = QWEN_MAX_PIXELS,
-    max_new_tokens: int = QWEN_MAX_NEW_TOKENS,
-) -> List[Segment]:
-    """Run inference on a single video (≤ ~3 min).
-
+    video_path: Path, model, processor, duration_s: float,
+    fps: float = QWEN_VIDEO_FPS, max_pixels: int = QWEN_MAX_PIXELS, max_new_tokens: int = QWEN_MAX_NEW_TOKENS,
+) -> List[Segment]: # Run inference on a single video (≤ ~3 min)
+    """
     Qwen3-VL requires video_metadata for its Text-Timestamp Alignment
     mechanism.  Without it, the model outputs garbled near-zero timestamps.
 
@@ -171,16 +167,9 @@ def _infer_single(
     return _parse_segments_json(output_text)
 
 
-def run_qwen_inference(
-    video_path: Path, *,
-    model_id: str = QWEN_MODEL_ID,
-    cache_dir: Optional[Path] = None,
-) -> List[Segment]:
-    """Run Qwen3-VL phrase segmentation on *video_path*.
-
-    Results are cached as JSON.  On subsequent calls the cached result is
-    returned immediately.
-    """
+def run_qwen_inference(video_path: Path, *, model_id: str = QWEN_MODEL_ID, cache_dir: Optional[Path] = None) -> List[Segment]: 
+    # Run Qwen3-VL phrase segmentation on *video_path*.
+    # Results are cached as JSON.  On subsequent calls the cached result is returned immediately.
     cache_dir = cache_dir or OUTPUT_DIR
     cache_path = cache_dir / f"{video_path.stem}_qwen.json"
 

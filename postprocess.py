@@ -31,8 +31,7 @@ def merge_short_segments(segments: List[Segment], min_duration_s: float = MIN_SE
         
         while i < len(result):
             seg = result[i]
-            if seg.duration() < min_duration_s and len(result) > 1:
-                # Merge with closest neighbour
+            if seg.duration() < min_duration_s and len(result) > 1: # Merge with closest neighbour
                 if i == 0 and i + 1 < len(result): # Merge with next
                     nxt = result[i + 1]
                     new_result.append(Segment(start_s=seg.start_s, end_s=nxt.end_s, text=nxt.text))
@@ -73,9 +72,7 @@ def fill_gaps(segments: List[Segment], max_gap_s: float = MAX_GAP_S) -> List[Seg
     For tiny inter-phrase gaps, extends the earlier segment's end to the
     next segment's start.  This removes "flicker" in the timeline.
     """
-    if len(segments) < 2:
-        return list(segments)
-
+    if len(segments) < 2: return list(segments)
     result = [segments[0]]
     for seg in segments[1:]:
         gap = seg.start_s - result[-1].end_s
@@ -83,8 +80,7 @@ def fill_gaps(segments: List[Segment], max_gap_s: float = MAX_GAP_S) -> List[Seg
             # Close the gap by extending the previous segment
             prev = result.pop()
             result.append(Segment(start_s=prev.start_s, end_s=seg.end_s, text=prev.text))
-        else:
-            result.append(seg)
+        else: result.append(seg)
     return result
 
 
@@ -92,7 +88,6 @@ def _load_pose_velocity(pose_path: Path) -> Optional[np.ndarray]:
     """Load a *.pose file and compute wrist velocity magnitude.
 
     Returns (times_s, velocity) arrays, or None if the file can't be loaded.
-
     The sign_language_processing/pose library stores poses in a custom
     binary format.  We use the `pose_format` package to read it.
     """
@@ -115,8 +110,7 @@ def _load_pose_velocity(pose_path: Path) -> Optional[np.ndarray]:
             body_comp = header.components[0]
             point_names = [p.name if hasattr(p, 'name') else str(p) for p in body_comp.points]
             wrist_indices = [i for i, name in enumerate(point_names) if 'wrist' in name.lower() or 'WRIST' in name]
-            if wrist_indices:
-                person_data = person_data[:, wrist_indices, :]
+            if wrist_indices: person_data = person_data[:, wrist_indices, :]
         except (AttributeError, IndexError): pass  # use all landmarks
 
         # Compute velocity: L2 norm of frame-to-frame displacement
@@ -170,9 +164,7 @@ def postprocess_segments(
     max_gap_s: float = MAX_GAP_S,
     snap_window_s: float = POSE_SNAP_WINDOW_S,
 ) -> List[Segment]:
-    """Apply all post-processing steps in order.
-
-    Order matters:
+    """Apply all post-processing steps in order. Order matters:
       1. Pose snapping first (refine raw VLM boundaries)
       2. Merge short segments (clean up stutter)
       3. Fill gaps (close tiny silences)
@@ -192,6 +184,5 @@ def postprocess_segments(
     # 3. Fill tiny gaps
     n_before_gaps = len(segments)
     segments = fill_gaps(segments, max_gap_s=max_gap_s)
-    if len(segments) != n_before_gaps:
-        print(f"  Fill gaps: {n_before_gaps} → {len(segments)} segments")
+    if len(segments) != n_before_gaps: print(f"  Fill gaps: {n_before_gaps} → {len(segments)} segments")
     return segments
